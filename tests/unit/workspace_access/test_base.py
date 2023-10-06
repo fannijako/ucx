@@ -3,10 +3,7 @@ from functools import partial
 from databricks.sdk.service import iam
 
 from databricks.labs.ucx.workspace_access.base import Applier, Permissions
-from databricks.labs.ucx.workspace_access.groups import (
-    GroupMigrationState,
-    MigrationGroupInfo,
-)
+from databricks.labs.ucx.workspace_access.groups import GroupMigrationState
 
 
 def test_applier():
@@ -25,11 +22,9 @@ def test_applier():
     positive_item = Permissions(object_id="test", object_type="test", raw="test")
     migration_state = GroupMigrationState()
     migration_state.add(
-        group=MigrationGroupInfo(
-            workspace=iam.Group(display_name="test", id="test"),
-            account=iam.Group(display_name="test", id="test-acc"),
-            backup=iam.Group(display_name="db-temp-test", id="test-backup"),
-        )
+        iam.Group(display_name="test", id="test"),
+        iam.Group(display_name="db-temp-test", id="test-backup"),
+        iam.Group(display_name="test", id="test-acc"),
     )
 
     task = applier.get_apply_task(positive_item, migration_state, "backup")
