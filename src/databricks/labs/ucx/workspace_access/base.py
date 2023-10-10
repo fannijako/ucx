@@ -3,7 +3,9 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import partial
 from logging import Logger
-from typing import Literal
+from typing import Literal, Optional
+
+from databricks.sdk.service.iam import AccessControlRequest, AccessControlResponse
 
 from databricks.labs.ucx.workspace_access.groups import GroupMigrationState
 
@@ -57,3 +59,14 @@ class Applier:
                 pass
 
             return partial(noop)
+
+    def response_to_request(self, acls: Optional["list[AccessControlResponse]"] = None) -> list[AccessControlRequest]:
+        results = []
+        for acl in acls:
+            for permission in acl.all_permissions:
+                results.append(
+                    AccessControlRequest(
+                        acl.group_name, permission.permission_level, acl.service_principal_name, acl.user_name
+                    )
+                )
+        return results
