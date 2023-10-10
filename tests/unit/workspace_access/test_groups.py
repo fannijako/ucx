@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, call
 
 import pytest
 from databricks.sdk.service import iam
@@ -186,8 +186,7 @@ def test_prepare_groups_in_environment_with_one_group_in_conf_should_return_migr
     manager.prepare_groups_in_environment()
 
     group_info = MigrationGroupInfo(workspace=ws_de_group, account=acc_de_group, backup=backup_de_group)
-    assert manager._migration_state.groups == [group_info]
-    assert len(manager._workspace_groups) == 2  # created backup group should be added to the list
+    assert manager.migration_groups_provider.groups == [group_info]
 
 
 def test_prepare_groups_in_environment_with_multiple_groups_in_conf_should_return_two_migrationgroupinfo_object():
@@ -213,7 +212,7 @@ def test_prepare_groups_in_environment_with_multiple_groups_in_conf_should_retur
     de_group_info = MigrationGroupInfo(workspace=ws_de_group, account=acc_de_group, backup=backup_de_group)
     ds_group_info = MigrationGroupInfo(workspace=ws_ds_group, account=acc_ds_group, backup=backup_ds_group)
 
-    assert compare(manager._migration_state.groups, [ds_group_info, de_group_info])
+    assert compare(manager.migration_groups_provider.groups, [ds_group_info, de_group_info])
 
 
 def test_prepare_groups_in_environment_should_not_throw_when_account_group_doesnt_exist():
@@ -260,7 +259,7 @@ def test_prepare_groups_in_environment_with_backup_group_not_created_should_crea
     manager = GroupManager(client, group_conf)
     manager.prepare_groups_in_environment()
     group_info = MigrationGroupInfo(workspace=ws_de_group, account=acc_de_group, backup=backup_de_group)
-    assert manager._migration_state.groups == [group_info]
+    assert manager.migration_groups_provider.groups == [group_info]
 
 
 def test_prepare_groups_in_environment_with_conf_in_auto_mode_should_populate_migrationgroupinfo_object():
@@ -282,7 +281,7 @@ def test_prepare_groups_in_environment_with_conf_in_auto_mode_should_populate_mi
     manager.prepare_groups_in_environment()
 
     group_info = MigrationGroupInfo(workspace=ws_de_group, account=acc_de_group, backup=backup_de_group)
-    assert manager._migration_state.groups == [group_info]
+    assert manager.migration_groups_provider.groups == [group_info]
 
 
 def test_prepare_groups_in_environment_with_no_groups():
@@ -305,13 +304,17 @@ def test_replace_workspace_groups_with_account_groups_should_call_delete_and_do(
     test_acc_group_id = "200"
     ws_de_group = Group(display_name="de", meta=ResourceMeta(resource_type="WorkspaceGroup"), id=test_ws_group_id)
     acc_de_group = Group(display_name="de", meta=ResourceMeta(resource_type="Group"), id=test_acc_group_id)
+    backup_de_group = Group(display_name="dbr_backup_de2", meta=ResourceMeta(resource_type="WorkspaceGroup"))
 
-    backup_de_group = Group(display_name="dbr_backup_de", meta=ResourceMeta(resource_type="WorkspaceGroup"))
+    # ws group backup already created and ws group deleted
+    test_acc_group_id2 = "300"
+    acc_de_group2 = Group(display_name="de", meta=ResourceMeta(resource_type="Group"), id=test_acc_group_id2)
+    backup_de_group2 = Group(display_name="dbr_backup_de2", meta=ResourceMeta(resource_type="WorkspaceGroup"))
 
     client.groups.list.return_value = [ws_de_group]
     client.api_client.do.side_effect = [
         {
-            "Resources": [g.as_dict() for g in [acc_de_group]],
+            "Resources": [g.as_dict() for g in [acc_de_group, acc_de_group2]],
         },
         {},
     ]
@@ -320,14 +323,24 @@ def test_replace_workspace_groups_with_account_groups_should_call_delete_and_do(
     manager = GroupManager(client, group_conf)
 
     group_info = MigrationGroupInfo(workspace=ws_de_group, account=acc_de_group, backup=backup_de_group)
-    manager._migration_state.groups = [group_info]
+    group_info2 = MigrationGroupInfo(workspace=None, account=acc_de_group2, backup=backup_de_group2)
+    manager._migration_state.groups = [group_info, group_info2]
     manager.replace_workspace_groups_with_account_groups()
 
     client.groups.delete.assert_called_with(id=test_ws_group_id)
-    client.api_client.do.assert_called_with(
-        "PUT",
-        f"/api/2.0/preview/permissionassignments/principals/{test_acc_group_id}",
-        data='{"permissions": ["USER"]}',
+    client.api_client.do.assert_has_calls(
+        [
+            call(
+                "PUT",
+                f"/api/2.0/preview/permissionassignments/principals/{test_acc_group_id}",
+                data='{"permissions": ["USER"]}',
+            ),
+            call(
+                "PUT",
+                f"/api/2.0/preview/permissionassignments/principals/{test_acc_group_id2}",
+                data='{"permissions": ["USER"]}',
+            ),
+        ]
     )
 
 
@@ -347,7 +360,7 @@ def test_system_groups():
     group_conf = GroupsConfig(backup_group_prefix="dbr_backup_", selected=["admins"])
     manager = GroupManager(client, group_conf)
     manager.prepare_groups_in_environment()
-    assert len(manager._migration_state.groups) == 0
+    assert len(manager.migration_groups_provider.groups) == 0
 
 
 def test_workspace_only_groups():
@@ -366,7 +379,7 @@ def test_workspace_only_groups():
     group_conf = GroupsConfig(backup_group_prefix="dbr_backup_", selected=["ws_group"])
     manager = GroupManager(client, group_conf)
     manager.prepare_groups_in_environment()
-    assert len(manager._migration_state.groups) == 0
+    assert len(manager.migration_groups_provider.groups) == 0
 
 
 def test_delete_backup_groups():
@@ -417,3 +430,29 @@ def test_delete_selected_backup_groups():
     manager = GroupManager(client, group_conf)
     manager.delete_backup_groups()
     client.groups.delete.assert_called_with(id=backup_group_id)
+
+
+def test_recover_after_backup_group_creation():
+    client = Mock()
+
+    ws_group_id = "100"
+    test_ws_group = Group(display_name="ws_group", meta=ResourceMeta(resource_type="WorkspaceGroup"), id=ws_group_id)
+    backup_group_id = "101"
+    test_ws_backup_group = Group(
+        display_name="dbr_backup_de", meta=ResourceMeta(resource_type="WorkspaceGroup"), id=backup_group_id
+    )
+
+    client.groups.list.return_value = [test_ws_group, test_ws_backup_group]
+
+    test_acc_group = Group(display_name="de", meta=ResourceMeta(resource_type="Group"))
+    client.api_client.do.return_value = {
+        "Resources": [g.as_dict() for g in [test_acc_group]],
+    }
+
+    group_conf = GroupsConfig(backup_group_prefix="dbr_backup_", auto=True)
+    manager = GroupManager(client, group_conf)
+    manager.prepare_groups_in_environment()
+    assert len(manager.migration_groups_provider.groups) == 1
+    assert manager.migration_groups_provider.groups[0].backup
+    assert manager.migration_groups_provider.groups[0].account
+    assert not manager.migration_groups_provider.groups[0].workspace
