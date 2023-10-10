@@ -152,7 +152,7 @@ class GroupManager:
             self._delete_workspace_group(ws_group)
         else:
             # the tool was restarted after the backup group was created and ws local group deleted
-            logger.info(f"Group has already been deleted")
+            logger.info("Group has already been deleted")
 
         self._reflect_account_group_to_workspace(migration_info.account)
 
