@@ -117,7 +117,7 @@ class GroupManager:
             roles=source_group.roles,
             members=source_group.members,
         )
-
+        self._workspace_groups.append(backup_group)
         logger.info(f"Backup group {backup_group_name} successfully created")
 
         return backup_group
