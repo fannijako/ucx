@@ -186,7 +186,8 @@ def test_prepare_groups_in_environment_with_one_group_in_conf_should_return_migr
     manager.prepare_groups_in_environment()
 
     group_info = MigrationGroupInfo(workspace=ws_de_group, account=acc_de_group, backup=backup_de_group)
-    assert manager.migration_groups_provider.groups == [group_info]
+    assert manager._migration_state.groups == [group_info]
+    assert len(manager._workspace_groups) == 2  # created backup group should be added to the list
 
 
 def test_prepare_groups_in_environment_with_multiple_groups_in_conf_should_return_two_migrationgroupinfo_object():
